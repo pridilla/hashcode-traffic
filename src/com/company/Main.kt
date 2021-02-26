@@ -4,9 +4,22 @@ import java.io.File
 import java.util.*
 import kotlin.collections.ArrayList
 
-val problemLetter = "f"
-
 fun main() {
+    val problemLetter = "b"
+    val problem = parseInput("b")
+
+    //val solver = PrimitiveSolver()
+    val solver = SolverTwo(4)
+
+    val solution = solver.getSchedule(problem)
+    simulate(problem, solution)
+    val score = getScore(problem)
+
+    outputSolution(problemLetter, solution)
+    println("problem $problemLetter - score $score")
+}
+
+fun parseInput(problemLetter: String): Problem {
     val sc = Scanner(File("inputs/${problemLetter}.txt"))
 
     val D = sc.nextInt()
@@ -25,16 +38,10 @@ fun main() {
         Car(it, P, (0 until P).map { streets[sc.next()]!! })
     }
 
-    val problem = Problem(D, I, S, V, F, intersections, streets, cars)
-
-    // Print output
-    val solution = PrimitiveSolver().getSchedule(problem)
-
-    printSolution(solution)
-    println("outputted problem ${problemLetter}")
+    return Problem(D, I, S, V, F, intersections, streets, cars)
 }
 
-fun printSolution(solution: Map<Intersection, IntersectionSchedule>) {
+fun outputSolution(problemLetter: String, solution: Map<Intersection, IntersectionSchedule>) {
     File("outputs/${problemLetter}.out").printWriter().use { out ->
         out.println("${solution.size}")
         solution.forEach { intersection, schedule ->
@@ -56,54 +63,115 @@ class Problem(
         val cars: Array<Car>)
 
 
-class Street(val beginning: Intersection, val end: Intersection, val name: String, val L: Int) {
+data class Street(val beginning: Intersection, val end: Intersection, val name: String, val L: Int) {
     val passingCars = ArrayList<Car>()
 
     init {
         beginning.outStreets.add(this)
         end.inStreets.add(this)
     }
+}
 
-    var trafficLight = TrafficLight.RED
-    fun switchRed() {
-        trafficLight = TrafficLight.RED
+data class Intersection(val id: Int) {
+    val inStreets: ArrayList<Street> = ArrayList()
+    val outStreets: ArrayList<Street> = ArrayList()
+
+    var schedule: IntersectionSchedule? = null
+    var congestion = HashMap<Street, Int>()
+
+    var scheduleIndex = 0
+    var scheduleIndexTime = 0
+
+    var waiting: HashMap<Street, LinkedList<Car>> = HashMap()
+    fun addWaiter(car: Car, fromStreet: Street) {
+        val currQueue = waiting.getOrPut(fromStreet) { LinkedList() }
+        if (car !in currQueue) {
+            currQueue.addLast(car)
+        }
     }
 
-    fun switchGreen() {
-        trafficLight = TrafficLight.GREEN
-        for (street in end.inStreets) {
-            street.switchRed()
+    fun reset() {
+        schedule = null
+        congestion = HashMap<Street, Int>()
+        scheduleIndex = 0
+        scheduleIndexTime = 0
+        waiting.clear()
+    }
+
+    fun step() {
+        val schedule = schedule
+        if (schedule != null) {
+            val currStreet = schedule[scheduleIndex].first
+            val currQueue = waiting[currStreet]
+            if (currQueue !== null && currQueue.isNotEmpty()) {
+                currQueue.removeFirst().moveAfterIntersection()
+            }
+        }
+        waiting.forEach { street, carList ->
+            if (street !in congestion) {
+                congestion[street] = 0
+            }
+            congestion.put(street, congestion[street]!! + carList.size)
+        }
+
+        if (schedule != null) {
+            scheduleIndexTime++
+            if (scheduleIndexTime == schedule[scheduleIndex].second) {
+                scheduleIndexTime = 0
+                scheduleIndex = (scheduleIndex + 1) % schedule.size
+            }
         }
     }
 }
 
-class Intersection(val id: Int) {
-    val inStreets: ArrayList<Street> = ArrayList()
-    val outStreets: ArrayList<Street> = ArrayList()
-
-    lateinit var schedule: IntersectionSchedule
-}
-
-class Car(val id: Int, val P: Int, val path: List<Street>) {
+data class Car(val id: Int, val P: Int, val path: List<Street>) {
     init {
         path.forEach { street ->
             street.passingCars.add(this)
         }
     }
-    var untilEndOfRoad = 0
-    var roadIndex = 0
-    fun isFinished() = roadIndex == path.size
-}
 
-enum class TrafficLight {
-    RED, GREEN
+    var pathIndex = 0
+    var onThisStreet = path[0].L
+    var finishedTime: Int? = null
+    var ignore = false
+    fun isFinished() = pathIndex == path.size - 1
+            && onThisStreet == path[pathIndex].L
+
+    fun step() {
+        if (isFinished()) {
+            return
+        }
+        if (onThisStreet < path[pathIndex].L) {
+            onThisStreet++
+        } else {
+            val currentStreet = path[pathIndex]
+            currentStreet.end.addWaiter(this, currentStreet)
+        }
+    }
+
+    fun checkFinish(time: Int) {
+        if (isFinished() && finishedTime == null)
+        finishedTime = time
+    }
+
+    fun moveAfterIntersection() {
+        pathIndex++
+        onThisStreet = 1
+    }
+
+    fun reset() {
+        pathIndex = 0
+        onThisStreet = path[0].L
+        finishedTime = null
+        ignore = false
+    }
 }
 
 interface Solver {
-    fun getSchedule(
-            problem: Problem
-    ): Solution
+    fun getSchedule(problem: Problem): Solution
 }
 
 typealias IntersectionSchedule = List<Pair<Street, Int>>
 typealias Solution = Map<Intersection, IntersectionSchedule>
+
